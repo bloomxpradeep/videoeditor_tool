@@ -474,4 +474,58 @@ describe('prelude QE helpers', () => {
       expect((sandbox.__result as { name: string }).name).toBe('Flou gaussien');
     });
   });
+
+  describe('__writeParamGuarded', () => {
+    // A Premiere property that stores its value on a 0-1 scale and clamps writes.
+    const normalizedProperty = (initial: number) => `
+      function makeProp() {
+        var v = ${initial};
+        return {
+          getValue: function () { return v; },
+          setValue: function (next) { v = Math.max(0, Math.min(1, next)); }
+        };
+      }
+    `;
+
+    it('restores the previous value and explains the scale when Premiere clamps a write', async () => {
+      const sandbox = await runWithPrelude(`
+        ${normalizedProperty(0.25)}
+        var prop = makeProp();
+        __result = __writeParamGuarded(prop, 80);
+        __final = prop.getValue();
+      `);
+
+      const result = sandbox.__result as Record<string, unknown>;
+      expect(result.clamped).toBe(true);
+      expect(result.reverted).toBe(true);
+      expect(result.clampedTo).toBe(1);
+      expect(sandbox.__final).toBe(0.25);
+      expect(result.hint).toMatch(/normalized 0-1 scale/);
+    });
+
+    it('accepts an in-range write without reverting', async () => {
+      const sandbox = await runWithPrelude(`
+        ${normalizedProperty(0.25)}
+        var prop = makeProp();
+        __result = __writeParamGuarded(prop, 0.1);
+        __final = prop.getValue();
+      `);
+
+      expect((sandbox.__result as Record<string, unknown>).clamped).toBe(false);
+      expect(sandbox.__final).toBe(0.1);
+    });
+
+    it('treats small rounding as a successful write, not a clamp', async () => {
+      const sandbox = await runWithPrelude(`
+        var v = 0;
+        var prop = {
+          getValue: function () { return v; },
+          setValue: function (next) { v = Math.round(next); }
+        };
+        __result = __writeParamGuarded(prop, 80.3);
+      `);
+
+      expect((sandbox.__result as Record<string, unknown>).clamped).toBe(false);
+    });
+  });
 });

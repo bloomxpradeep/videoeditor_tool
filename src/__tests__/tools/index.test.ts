@@ -1366,6 +1366,22 @@ describe('PremiereProTools', () => {
       expect(script).toContain('warnings: paramWarnings');
       expect(script).toContain('if (__namesMatch(newComp.properties[k].displayName, pName))');
       expect(script).toContain('__coercePropertyValue');
+      expect(script).toContain('__writeParamGuarded(matched.prop, coercedVal)');
+      expect(script).toContain('verification: write.reverted ? "clamped_reverted" : "clamped"');
+    });
+
+    it('fails apply_audio_effect_to_all_clips params that Premiere clamps', async () => {
+      mockBridge.executeScript.mockResolvedValue({ success: true, allOk: false, perClip: [] });
+
+      await tools.executeTool('apply_audio_effect_to_all_clips', {
+        sequenceId: 'seq-123',
+        effectName: 'Highpass',
+        parameters: { Cutoff: 80 },
+      });
+
+      const script = mockBridge.executeScript.mock.calls[0][0];
+      expect(script).toContain('var write = __writeParamGuarded(matched, requestedVal)');
+      expect(script).toContain('ok: paramsOk');
     });
 
     it('returns an explicit unsupported result for caption track deletion', async () => {
@@ -2421,6 +2437,46 @@ describe('PremiereProTools', () => {
         expect.objectContaining({ code: 'OUTPUT_EXISTS' }),
       ]));
       expect(mockBridge.renderSequence).not.toHaveBeenCalled();
+    });
+
+    it('clears an existing output before queueing when allowOverwrite is true', async () => {
+      const { root, presetPath, outputPath } = await createTempPreset();
+      await fs.writeFile(outputPath, 'old render', 'utf8');
+      let existedAtQueueTime = true;
+      mockBridge.renderSequence.mockImplementation(async () => {
+        existedAtQueueTime = await fs.access(outputPath).then(() => true, () => false);
+        return { success: true, queued: true, jobID: 'job-overwrite' };
+      });
+
+      const result = await tools.executeTool('export_sequence', {
+        sequenceId: 'seq-1',
+        outputPath,
+        presetPath,
+        allowOverwrite: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.replacedExistingOutput).toBe(true);
+      // AME auto-renames to "<name>_1" when the path is occupied at queue time.
+      expect(existedAtQueueTime).toBe(false);
+      const leftovers = (await fs.readdir(root)).filter((name) => name.includes('.replaced-'));
+      expect(leftovers).toEqual([]);
+    });
+
+    it('restores the existing output when an overwrite export fails to queue', async () => {
+      const { presetPath, outputPath } = await createTempPreset();
+      await fs.writeFile(outputPath, 'old render', 'utf8');
+      mockBridge.renderSequence.mockResolvedValue({ success: false, error: 'AME unavailable' });
+
+      const result = await tools.executeTool('export_sequence', {
+        sequenceId: 'seq-1',
+        outputPath,
+        presetPath,
+        allowOverwrite: true,
+      });
+
+      expect(result.success).toBe(false);
+      await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('old render');
     });
 
     it('resolves a unique presetName exactly and rejects ambiguous names', async () => {

@@ -20,7 +20,7 @@ export const exportTools: ToolModule[] = [
       presetPath: z.string().optional().describe('Absolute path to an export preset file (.epr). Required unless presetName uniquely resolves through get_encoder_presets.'),
       presetName: z.string().optional().describe('Exact user preset display name or filename stem. Must resolve to exactly one discovered .epr preset.'),
       sourceRange: z.enum(['entire', 'in_out', 'work_area']).optional().describe('Export source range. Defaults to entire. Requested ranges are never silently substituted.'),
-      allowOverwrite: z.boolean().optional().describe('Allow writing to an existing output file. Defaults to false.'),
+      allowOverwrite: z.boolean().optional().describe('Replace an existing output file. The old file is removed once the job is queued, so AME writes to outputPath instead of an auto-renamed "_1" copy. Defaults to false.'),
       removeOnCompletion: z.boolean().optional().describe('Pass AME removeOnCompletion. Defaults to true to preserve existing queue behavior.'),
       format: z.enum(['mp4', 'mov', 'avi', 'h264', 'prores']).optional().describe('Deprecated hint only; the .epr preset controls codec/container.'),
       quality: z.enum(['low', 'medium', 'high', 'maximum']).optional().describe('Deprecated hint only; the .epr preset controls quality.'),
@@ -48,7 +48,7 @@ export const exportTools: ToolModule[] = [
       presetPath: z.string().optional().describe('Export preset file path'),
       presetName: z.string().optional().describe('Exact user preset display name or filename stem. Must resolve to exactly one discovered .epr preset.'),
       sourceRange: z.enum(['entire', 'in_out', 'work_area']).optional().describe('Export source range. Defaults to entire.'),
-      allowOverwrite: z.boolean().optional().describe('Allow writing to an existing output file. Defaults to false.'),
+      allowOverwrite: z.boolean().optional().describe('Replace an existing output file. The old file is removed once the job is queued, so AME writes to outputPath instead of an auto-renamed "_1" copy. Defaults to false.'),
       removeOnCompletion: z.boolean().optional().describe('Pass AME removeOnCompletion. Defaults to true.'),
       startImmediately: z.boolean().optional().describe('Whether to start rendering immediately (default: false)')
     }),
@@ -196,6 +196,26 @@ async function validateExportPaths(outputPath: string, presetPath: string, allow
   return errors;
 }
 
+async function moveAsideExistingOutput(outputPath: string): Promise<string | undefined> {
+  try {
+    await fs.access(outputPath, fsConstants.F_OK);
+  } catch {
+    return undefined;
+  }
+  const displaced = `${outputPath}.replaced-${Date.now()}`;
+  await fs.rename(outputPath, displaced);
+  return displaced;
+}
+
+async function restoreDisplacedOutput(displaced: string | undefined, outputPath: string): Promise<void> {
+  if (!displaced) return;
+  try {
+    await fs.rename(displaced, outputPath);
+  } catch {
+    // Leave the displaced copy in place rather than lose it.
+  }
+}
+
 function deprecatedExportOptionWarnings(format?: string, quality?: string, resolution?: string): Array<{ code: string; message: string; value?: string }> {
   const warnings: Array<{ code: string; message: string; value?: string }> = [];
   if (format) warnings.push({ code: 'FORMAT_IGNORED', message: 'format is deprecated for export_sequence; the .epr preset controls the container and codec.', value: format });
@@ -258,6 +278,25 @@ async function exportSequence(ctx: ToolContext, args: ExportSequenceArgs): Promi
     };
   }
 
+  // AME never replaces an existing file: it quietly writes "<name>_1.<ext>"
+  // instead, so allowOverwrite has to clear the path before queueing. The old
+  // file is moved aside rather than deleted so a failed queue can put it back.
+  let displacedOutput: string | undefined;
+  if (allowOverwrite) {
+    try {
+      displacedOutput = await moveAsideExistingOutput(outputPath);
+    } catch (error) {
+      return {
+        success: false,
+        error: `Could not clear the existing output file for overwrite: ${error instanceof Error ? error.message : String(error)}`,
+        sequenceId,
+        outputPath,
+        presetPath,
+        allowOverwrite,
+      };
+    }
+  }
+
   try {
     // bridge.renderSequence returns a structured response; propagate it instead
     // of unconditionally claiming success. Pre-fix wrapper reported success even
@@ -268,6 +307,7 @@ async function exportSequence(ctx: ToolContext, args: ExportSequenceArgs): Promi
     });
 
     if (result && result.success === false) {
+      await restoreDisplacedOutput(displacedOutput, outputPath);
       return {
         ...result,
         sequenceId,
@@ -284,9 +324,12 @@ async function exportSequence(ctx: ToolContext, args: ExportSequenceArgs): Promi
       };
     }
 
+    if (displacedOutput) await fs.rm(displacedOutput, { force: true });
+
     return {
       success: true,
       status: result?.status ?? 'queued',
+      replacedExistingOutput: Boolean(displacedOutput),
       message: 'Sequence queued in Adobe Media Encoder. Render runs asynchronously — verify by checking the output file size growth.',
       sequenceId,
       outputPath,
@@ -307,6 +350,7 @@ async function exportSequence(ctx: ToolContext, args: ExportSequenceArgs): Promi
       verify: `ffprobe -show_entries format=duration,size '${outputPath}'`,
     };
   } catch (error) {
+    await restoreDisplacedOutput(displacedOutput, outputPath);
     return {
       success: false,
       error: `Failed to export sequence: ${error instanceof Error ? error.message : String(error)}`,

@@ -642,6 +642,56 @@ function __coercePropertyValue(property, value, axis) {
   if (!currentIsArray && valueIsArray) return value[0];
   return value;
 }
+// Premiere stores many effect parameters (filter cutoffs, gains) on a
+// normalized 0-1 scale and silently clamps out-of-range writes, so asking for
+// 80 Hz can land at the maximum. A numeric readback more than 1% away from the
+// request is a clamp, not a rounding, and must not be reported as applied.
+function __numericWriteMismatch(requested, actual) {
+  if (typeof requested !== "number" || typeof actual !== "number") return false;
+  var tolerance = Math.max(0.0001, Math.abs(requested) * 0.01);
+  return Math.abs(actual - requested) > tolerance;
+}
+function __normalizedScaleHint(valueBefore, requested, valueAfter) {
+  if (typeof requested !== "number" || typeof valueAfter !== "number") return undefined;
+  if ((requested < 0 || requested > 1) && valueAfter >= 0 && valueAfter <= 1) {
+    return "This parameter uses Premiere's normalized 0-1 scale, not real units. Pass a fraction between 0 and 1 (its value before the write was " + valueBefore + ").";
+  }
+  return undefined;
+}
+// Writes value, reads it back, and restores the previous value when Premiere
+// clamped a numeric write. Returns the fields a paramResults entry needs.
+function __writeParamGuarded(property, value) {
+  var valueBefore = null;
+  var beforeReadable = true;
+  try { valueBefore = property.getValue(); } catch (eB) { beforeReadable = false; }
+  property.setValue(value, true);
+  var valueAfter = null;
+  var afterReadable = true;
+  try { valueAfter = property.getValue(); } catch (eA) { afterReadable = false; }
+  if (afterReadable && __numericWriteMismatch(value, valueAfter)) {
+    var reverted = false;
+    if (beforeReadable) {
+      try { property.setValue(valueBefore, true); reverted = true; } catch (eR) {}
+    }
+    return {
+      clamped: true,
+      reverted: reverted,
+      valueBefore: valueBefore,
+      valueAfter: reverted ? valueBefore : valueAfter,
+      clampedTo: valueAfter,
+      beforeReadable: beforeReadable,
+      afterReadable: afterReadable,
+      hint: __normalizedScaleHint(valueBefore, value, valueAfter)
+    };
+  }
+  return {
+    clamped: false,
+    valueBefore: valueBefore,
+    valueAfter: valueAfter,
+    beforeReadable: beforeReadable,
+    afterReadable: afterReadable
+  };
+}
 function __secondsToTimecode(seconds, fps) {
   fps = Number(fps);
   if (!isFinite(fps) || fps <= 0) fps = 30;

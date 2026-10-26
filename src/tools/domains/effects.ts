@@ -445,14 +445,29 @@ export async function applyEffect(ctx: ToolContext, clipId: string, effectName: 
           }
           if (matched) {
             try {
-              var valueBefore = null;
-              var beforeReadable = true;
-              try { valueBefore = matched.prop.getValue(); } catch (eB) { beforeReadable = false; }
               var coercedVal = __coercePropertyValue(matched.prop, requestedVal, null);
-              matched.prop.setValue(coercedVal, true);
-              var valueAfter = null;
-              var afterReadable = true;
-              try { valueAfter = matched.prop.getValue(); } catch (eA) { afterReadable = false; }
+              var write = __writeParamGuarded(matched.prop, coercedVal);
+              var valueBefore = write.valueBefore;
+              var beforeReadable = write.beforeReadable;
+              var valueAfter = write.valueAfter;
+              var afterReadable = write.afterReadable;
+              if (write.clamped) {
+                paramResults.push({
+                  requestedName: pName,
+                  matchedDisplayName: String(matched.prop.displayName),
+                  strategy: matched.strategy,
+                  valueRequested: requestedVal,
+                  valueBefore: valueBefore,
+                  valueAfter: valueAfter,
+                  clampedTo: write.clampedTo,
+                  verification: write.reverted ? "clamped_reverted" : "clamped",
+                  error: "Premiere clamped " + requestedVal + " to " + write.clampedTo +
+                    (write.reverted ? "; the previous value was restored." : "; the previous value could not be restored."),
+                  hint: write.hint,
+                  ok: false
+                });
+                continue;
+              }
               var verified = afterReadable && valuesEquivalent(valueAfter, coercedVal);
               var changed = beforeReadable && afterReadable && !valuesEquivalent(valueAfter, valueBefore);
               var acceptedWithWarning = !verified && changed;
@@ -504,7 +519,8 @@ export async function applyEffect(ctx: ToolContext, clipId: string, effectName: 
           },
           paramResults: paramResults,
           warnings: paramWarnings,
-          error: failedParams.length ? "One or more effect parameters could not be set" : undefined
+          error: failedParams.length ? "One or more effect parameters could not be set" : undefined,
+          note: failedParams.length ? "The effect is still on the clip with its other settings; call undo to remove it." : undefined
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: "QE DOM error: " + e.toString() });

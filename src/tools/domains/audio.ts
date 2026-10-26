@@ -505,10 +505,21 @@ async function applyAudioEffectToAllClips(ctx: ToolContext, sequenceId: string, 
                 }
                 if (matched) {
                   try {
-                    matched.setValue(requestedVal, true);
-                    var valueAfter = null;
-                    try { valueAfter = matched.getValue(); } catch (eA) {}
-                    paramResults.push({ name: pName, ok: true, valueRequested: requestedVal, valueAfter: valueAfter });
+                    var write = __writeParamGuarded(matched, requestedVal);
+                    if (write.clamped) {
+                      paramResults.push({
+                        name: pName,
+                        ok: false,
+                        valueRequested: requestedVal,
+                        valueAfter: write.valueAfter,
+                        clampedTo: write.clampedTo,
+                        error: "Premiere clamped " + requestedVal + " to " + write.clampedTo +
+                          (write.reverted ? "; the previous value was restored." : "; the previous value could not be restored."),
+                        hint: write.hint
+                      });
+                    } else {
+                      paramResults.push({ name: pName, ok: true, valueRequested: requestedVal, valueAfter: write.valueAfter });
+                    }
                   } catch (e1) {
                     paramResults.push({ name: pName, ok: false, error: e1.toString() });
                   }
@@ -516,7 +527,11 @@ async function applyAudioEffectToAllClips(ctx: ToolContext, sequenceId: string, 
                   paramResults.push({ name: pName, ok: false, error: "no matching property" });
                 }
               }
-              perClip.push({ clipIndex: c, trackIndex: t, clipId: String(clip.nodeId), name: String(clip.name), ok: true, paramResults: paramResults });
+              var paramsOk = true;
+              for (var pri = 0; pri < paramResults.length; pri++) {
+                if (!paramResults[pri].ok) paramsOk = false;
+              }
+              perClip.push({ clipIndex: c, trackIndex: t, clipId: String(clip.nodeId), name: String(clip.name), ok: paramsOk, paramResults: paramResults });
             } catch (e2) {
               perClip.push({ clipIndex: c, trackIndex: t, clipId: String(clip.nodeId), name: String(clip.name), ok: false, error: e2.toString() });
             }
