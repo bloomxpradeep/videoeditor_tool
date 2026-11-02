@@ -29,6 +29,8 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
+    "studio": "npm --prefix studio start",
+    "studio:dev": "npm --prefix studio run dev",
     "install-cep": "node dist/cli.js --install-cep",
     "doctor": "node dist/cli.js --doctor",
     "setup:mac": "bash ./scripts/install-macos.sh",
