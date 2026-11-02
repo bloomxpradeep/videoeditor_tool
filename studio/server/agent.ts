@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { query, type CanUseTool, type McpServerConfig, type Query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { appendEvent, saveJob } from './jobs.js';
 import type { ChatEvent, JobMeta, JobStatus, Question } from './protocol.js';
@@ -27,6 +28,31 @@ const SAFE_TOOLS = new Set([
   'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Skill', 'ToolSearch', 'TodoWrite', 'EnterPlanMode', 'ExitPlanMode',
   'Monitor', 'ListMcpResourcesTool', 'ReadMcpResourceTool',
 ]);
+
+// House-style memory: the one Claude Code keeps for this repo. Jobs run in their own work folder, so Claude Code only
+// loads that folder's memory; this shares the editing preferences across every job (and every Mac set up from the kit).
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+export const SHARED_MEMORY =
+  process.env.STUDIO_MEMORY_DIR ||
+  path.join(os.homedir(), '.claude/projects', REPO_ROOT.replace(/[^A-Za-z0-9]/g, '-'), 'memory');
+
+/** The shared memory index, read fresh each turn so preferences saved by another job show up. */
+function sharedMemoryPrompt(): string {
+  let index = '';
+  try {
+    index = fs.readFileSync(path.join(SHARED_MEMORY, 'MEMORY.md'), 'utf8').trim();
+  } catch {
+    return '';
+  }
+  return `
+
+# Shared house-style memory
+These are the editor team's standing preferences, shared by every job. The files are in ${SHARED_MEMORY}.
+Before planning an edit, read the files below that bear on it, and follow them over your defaults. Instructions in this job's chat override them.
+When the editor gives feedback that applies beyond this video (style, effects, music, text, tools to avoid), save it in that folder in the same format and add its line to MEMORY.md there. Update an existing file rather than duplicating it. Facts about this video or client only go to this job's own memory.
+
+${index}`;
+}
 
 /** The premiere-pro server exactly as the user's Claude Code has it configured (command + env from ~/.claude.json). */
 function userMcpServers(): Record<string, McpServerConfig> {
@@ -145,7 +171,7 @@ export class JobRunner {
     }
     const filePath = typeof input.file_path === 'string' ? path.resolve(input.file_path) : '';
     const inside = (dir: string) => filePath.startsWith(dir + path.sep);
-    if (['Write', 'Edit', 'NotebookEdit'].includes(toolName) && (inside(this.meta.workdir) || inside(path.join(os.homedir(), 'Movies')))) {
+    if (['Write', 'Edit', 'NotebookEdit'].includes(toolName) && [this.meta.workdir, path.join(os.homedir(), 'Movies'), SHARED_MEMORY].some(inside)) {
       return { behavior: 'allow', updatedInput: input };
     }
     if (toolName === 'Bash' && bashIsSafe(String(input.command || ''))) {
@@ -175,7 +201,7 @@ export class JobRunner {
           model: MODEL,
           resume: this.meta.sessionId,
           settingSources: ['user', 'project', 'local'],
-          systemPrompt: { type: 'preset', preset: 'claude_code', append: STUDIO_PROMPT },
+          systemPrompt: { type: 'preset', preset: 'claude_code', append: STUDIO_PROMPT + sharedMemoryPrompt() },
           mcpServers: userMcpServers(),
           permissionMode: 'default',
           canUseTool: this.canUseTool,
