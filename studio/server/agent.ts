@@ -16,7 +16,8 @@ const STUDIO_PROMPT = `You are running inside Reel Studio, a browser chat app th
 - The editor cannot see tool output or the terminal. Say in plain words what you did and where outputs were written (paths relative to the work folder).
 - When a decision is genuinely the editor's, ask with AskUserQuestion; it shows as clickable cards in their chat.
 - Keep progress messages short. Put finished videos in exports/ so they appear in the editor's player.
-- A "Typography" block comes from the editor's text panel: follow it exactly. Its fonts are installed in ~/Library/Fonts; set them in AE by the PostScript names given.`;
+- A "Typography" block comes from the editor's text panel: follow it exactly. Its fonts are installed in ~/Library/Fonts; set them in AE by the PostScript names given.
+- API keys live in single-line files, not env vars: ElevenLabs in ~/.elevenlabs_key (header xi-api-key), Magnific in ~/.magnific_key (header x-magnific-api-key; it also runs Mystic images and Kling image-to-video). Read them inside your scripts and never print them. If a file is missing, ask the editor to create it.`;
 
 // Bash commands that run without asking: the media toolchain used in every edit, plus read-only shell basics.
 const SAFE_BASH = new Set([
