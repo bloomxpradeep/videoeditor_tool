@@ -60,8 +60,20 @@ export interface FontFamily {
   postscript: string[];
 }
 
+// The Claude account jobs run under on this Mac; `login` is set while a sign-in is in progress.
+export interface ClaudeAccount {
+  loggedIn: boolean;
+  email?: string;
+  plan?: string;
+  method?: string;
+  checking?: boolean;
+  error?: string;
+  login?: { url?: string };
+}
+
 export type ServerMsg =
   | { type: 'jobs'; jobs: JobMeta[] }
+  | { type: 'claude'; account: ClaudeAccount }
   | { type: 'history'; jobId: string; events: ChatEvent[] }
   | { type: 'event'; jobId: string; event: ChatEvent }
   | { type: 'status'; jobId: string; status: JobStatus }

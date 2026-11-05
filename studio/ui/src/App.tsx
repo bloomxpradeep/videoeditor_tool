@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import type { ChatEvent, FileEntry, JobMeta } from '../../server/protocol';
+import type { ChatEvent, ClaudeAccount, FileEntry, JobMeta } from '../../server/protocol';
 import { socket } from './ws';
 import { JobSidebar } from './JobSidebar';
 import { Chat } from './Chat';
 import { FilesPanel } from './FilesPanel';
+import { Login } from './Login';
 
 const LAST_JOB = 'reel-studio:job';
 const store = {
@@ -32,14 +33,24 @@ export function App() {
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [online, setOnline] = useState(socket.connected);
+  const [locked, setLocked] = useState(false);
+  const [account, setAccount] = useState<ClaudeAccount>({ loggedIn: false, checking: true });
   const job = jobs.find((j) => j.id === jobId);
   const jobIdRef = useRefValue(jobId);
+
+  // another Mac on the network that has not entered the passcode yet
+  useEffect(() => {
+    fetch('/api/jobs')
+      .then((r) => setLocked(r.status === 401))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     socket.onConnection = setOnline;
     setOnline(socket.connected); // the socket may have opened before this effect ran
     return socket.on((m) => {
       if (m.type === 'jobs') setJobs(m.jobs);
+      else if (m.type === 'claude') setAccount(m.account);
       else if (m.type === 'history' && m.jobId === jobIdRef.current) setEvents(m.events);
       else if (m.type === 'event' && m.jobId === jobIdRef.current) {
         setEvents((ev) => [...ev, m.event]);
@@ -84,17 +95,20 @@ export function App() {
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   }
 
+  if (locked) return <Login />;
+
   return (
     <div className="app">
-      <JobSidebar jobs={jobs} current={jobId} onPick={setJobId} onCreate={createJob} />
+      <JobSidebar jobs={jobs} current={jobId} account={account} onPick={setJobId} onCreate={createJob} />
       {job ? (
         <>
-          <Chat key={job.id} job={job} events={events} online={online} onUploaded={() => loadFiles(job.id)} />
+          <Chat key={job.id} job={job} events={events} online={online} signedIn={account.loggedIn || !!account.checking} onUploaded={() => loadFiles(job.id)} />
           <FilesPanel job={job} files={files} events={events} />
         </>
       ) : (
         <main className="empty">
           <h1>Reel Studio</h1>
+          {!account.loggedIn && !account.checking && <p>First, use <strong>Sign in with Claude</strong> at the bottom of the sidebar.</p>}
           <p>Create a job from the sidebar. Point it at an edit folder (an existing one or a new one), then tell Claude what to make.</p>
         </main>
       )}

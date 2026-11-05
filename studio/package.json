@@ -5,9 +5,10 @@
   "description": "Browser chat UI for editors to direct Claude + the Premiere MCP",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n server,ui \"tsx watch server/index.ts\" \"vite\"",
+    "dev": "concurrently -k -n server,ui \"STUDIO_NO_OPEN=1 tsx watch server/index.ts\" \"vite\"",
     "build": "vite build",
     "start": "vite build && tsx server/index.ts",
+    "lan": "vite build && STUDIO_HOST=0.0.0.0 caffeinate -i tsx server/index.ts",
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p ui"
   },
   "dependencies": {

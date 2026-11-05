@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import type { JobMeta, JobStatus } from '../../server/protocol';
+import type { ClaudeAccount, JobMeta, JobStatus } from '../../server/protocol';
+import { ClaudeAccountBox } from './ClaudeAccount';
 
 const LABEL: Record<JobStatus, string> = {
   idle: 'New',
@@ -12,6 +13,7 @@ const LABEL: Record<JobStatus, string> = {
 export function JobSidebar(props: {
   jobs: JobMeta[];
   current: string;
+  account: ClaudeAccount;
   onPick: (id: string) => void;
   onCreate: (name: string, workdir: string) => Promise<void>;
 }) {
@@ -49,7 +51,10 @@ export function JobSidebar(props: {
             Edit folder
             <input value={workdir} onChange={(e) => setWorkdir(e.target.value)} placeholder="~/Movies/client/project_edit" required />
           </label>
-          <small>Use an existing edit folder to continue a project, or a new path to start one.</small>
+          <small>
+            A folder on the studio Mac. Use an existing edit folder to continue a project, or a new path to start one, then drop your
+            footage into the chat.
+          </small>
           {err && <div className="err">{err}</div>}
           <button className="primary" type="submit">
             Create
@@ -66,6 +71,7 @@ export function JobSidebar(props: {
         ))}
         {!props.jobs.length && !adding && <p className="muted pad">No jobs yet.</p>}
       </nav>
+      <ClaudeAccountBox account={props.account} />
     </aside>
   );
 }

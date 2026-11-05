@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Set up Reel Studio on a new Mac: tools, Premiere MCP + CEP panel, Claude Code, Studio itself, and the studio kit
-# (fonts, text-style library, reference scripts, Claude memory) made on the main Mac by scripts/make-studio-kit.sh.
+# Set up Reel Studio on a Mac from a clone of this repo: tools, the Premiere MCP + CEP panel built from this clone, and
+# Studio itself. Optionally also the studio kit (fonts, text-style library, reference scripts, Claude memory) made on
+# the main Mac by scripts/make-studio-kit.sh. Claude sign-in happens later, in Studio's sidebar.
 # Safe to run again; existing files are never overwritten.
 #
-#   bash scripts/setup-studio-mac.sh ~/Downloads/ReelStudioKit-20261102.zip
+#   npm run studio:setup
+#   npm run studio:setup -- ~/Downloads/ReelStudioKit-20261102.zip
 
 set -euo pipefail
 
@@ -11,6 +13,7 @@ KIT_ZIP="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMP_DIR="/tmp/premiere-mcp-bridge"
+CEP_TARGET_DIR="$HOME/Library/Application Support/Adobe/CEP/extensions/MCPBridgeCEP"
 WARNINGS=()
 
 step() { printf '\n==> %s\n' "$1"; }
@@ -21,9 +24,9 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "Reel Studio runs on macOS only."
   exit 1
 fi
-if [[ -z "$KIT_ZIP" || ! -f "$KIT_ZIP" ]]; then
-  echo "Usage: bash scripts/setup-studio-mac.sh <ReelStudioKit.zip>"
-  echo "Make the kit on the main Mac with: bash scripts/make-studio-kit.sh"
+if [[ -n "$KIT_ZIP" && ! -f "$KIT_ZIP" ]]; then
+  echo "Kit zip not found: $KIT_ZIP"
+  echo "Usage: npm run studio:setup [-- <ReelStudioKit.zip>]"
   exit 1
 fi
 
@@ -47,6 +50,7 @@ step "Adobe apps"
 ls -d /Applications/Adobe\ Premiere\ Pro* >/dev/null 2>&1 && echo "  Premiere Pro: found" || warn "Premiere Pro not found in /Applications. Install it from Creative Cloud."
 ls -d /Applications/Adobe\ After\ Effects* >/dev/null 2>&1 && echo "  After Effects: found" || warn "After Effects not found in /Applications. Install it from Creative Cloud."
 
+install_kit() {
 step "Studio kit"
 KIT_TMP="$(mktemp -d)"
 trap 'rm -rf "$KIT_TMP"' EXIT
@@ -103,6 +107,14 @@ if [[ -f "$KIT/claude/settings.json" && ! -f "$HOME/.claude/settings.json" ]]; t
   cp "$KIT/claude/settings.json" "$HOME/.claude/settings.json"
   echo "  Claude settings -> ~/.claude/settings.json"
 fi
+}
+
+if [[ -n "$KIT_ZIP" ]]; then
+  install_kit
+else
+  step "Studio kit"
+  warn "No kit zip given: fonts, AE text styles and the house-style memory were not installed. Run again with the kit zip to add them."
+fi
 
 step "API keys"
 ask_key() {
@@ -121,17 +133,16 @@ ask_key() {
 ask_key "$HOME/.magnific_key" "Magnific"
 ask_key "$HOME/.elevenlabs_key" "ElevenLabs"
 
-step "Claude Code"
-if command -v claude >/dev/null 2>&1; then
-  echo "  claude: $(claude --version 2>/dev/null | head -1)"
-else
-  npm install -g @anthropic-ai/claude-code
-fi
-
-step "Premiere MCP server + CEP panel"
-npm install -g "adobe-premiere-pro-mcp@${KIT_MCP_VERSION}"
-MCP_ENTRY="$(npm root -g)/adobe-premiere-pro-mcp/dist/index.js"
-premiere-pro-mcp --install-cep || warn "premiere-pro-mcp --install-cep failed. Run it again after closing Premiere."
+step "Premiere MCP server + CEP panel (built from this clone)"
+npm install --prefix "$REPO_ROOT"
+npm run build --prefix "$REPO_ROOT"
+MCP_ENTRY="$REPO_ROOT/dist/index.js"
+[[ -f "$MCP_ENTRY" ]] || { echo "Build finished but dist/index.js is missing."; exit 1; }
+# Same steps as scripts/install-macos.sh, minus its Claude Desktop config.
+for v in 10 11 12; do defaults write "com.adobe.CSXS.$v" PlayerDebugMode 1; done
+mkdir -p "$CEP_TARGET_DIR"
+cp -R "$REPO_ROOT/cep-plugin/." "$CEP_TARGET_DIR/"
+echo "  MCP Bridge panel -> ${CEP_TARGET_DIR/#$HOME/~}"
 mkdir -p "$TEMP_DIR"
 # Same entry Studio reads from ~/.claude.json on the main Mac (server/agent.ts userMcpServers).
 CONFIG="$HOME/.claude.json" ENTRY="$MCP_ENTRY" TEMP_PATH="$TEMP_DIR" node -e '
@@ -163,7 +174,8 @@ fi
 cat <<EOF
 
 Next:
-  1. Run \`claude\` once in Terminal and log in, then quit it (/exit). Studio uses that login.
-  2. Open Premiere Pro, then Window > Extensions > MCP Bridge (CEP), and open After Effects once.
-  3. Start Studio: cd "$REPO_ROOT" && npm run studio   then open http://localhost:8787
+  1. Open Premiere Pro, then Window > Extensions > MCP Bridge (CEP). Open After Effects once and turn on
+     Settings > Scripting & Expressions > "Allow Scripts to Write Files and Access Network".
+  2. Start Studio:   npm run studio      (it opens http://localhost:8787 in your browser)
+  3. In Studio, click "Sign in with Claude" at the bottom of the sidebar and sign in with your Claude account.
 EOF

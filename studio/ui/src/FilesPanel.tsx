@@ -52,7 +52,14 @@ export function FilesPanel({ job, files, events }: { job: JobMeta; files: FileEn
         </>
       )}
 
-      <h3>Files</h3>
+      <div className="row between">
+        <h3>Files</h3>
+        {exportsVideos.length > 0 && (
+          <a className="small" href={`/api/jobs/${job.id}/zip`} download title="Exports and the Premiere project as one zip">
+            Download all
+          </a>
+        )}
+      </div>
       <ul className="filelist">
         {others.map((f) => (
           <li key={f.path}>

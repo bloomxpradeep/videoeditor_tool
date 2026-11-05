@@ -37,7 +37,19 @@ const typoStore = {
   },
 };
 
-export function Chat({ job, events, online, onUploaded }: { job: JobMeta; events: ChatEvent[]; online: boolean; onUploaded: () => void }) {
+export function Chat({
+  job,
+  events,
+  online,
+  signedIn,
+  onUploaded,
+}: {
+  job: JobMeta;
+  events: ChatEvent[];
+  online: boolean;
+  signedIn: boolean;
+  onUploaded: () => void;
+}) {
   const [text, setText] = useState('');
   const [presets, setPresets] = useState<Record<string, string>>({});
   const [typoState, setTypoState] = useState(() => typoStore.get(job.id));
@@ -82,7 +94,7 @@ export function Chat({ job, events, online, onUploaded }: { job: JobMeta; events
 
   function send() {
     const body = text.trim();
-    if (!body || busy) return;
+    if (!body || busy || !signedIn) return;
     const prefs = Object.entries(presets).filter(([, v]) => v && !v.startsWith('Auto'));
     let full = firstMessage && prefs.length ? `${body}\n\nPreferences: ${prefs.map(([k, v]) => `${k}: ${v}`).join('; ')}` : body;
     if (firstMessage && brief) {
@@ -94,7 +106,7 @@ export function Chat({ job, events, online, onUploaded }: { job: JobMeta; events
   }
 
   function applyTypo() {
-    if (busy || !brief) return;
+    if (busy || !brief || !signedIn) return;
     socket.send({ type: 'send', jobId: job.id, text: `${APPLY_TYPO}\n\n${brief}` });
     saveTypo((s) => ({ ...s, applied: brief }));
     setTypoOpen(false);
@@ -217,10 +229,11 @@ export function Chat({ job, events, online, onUploaded }: { job: JobMeta; events
             placeholder={busy ? 'Claude is working. You can type your next message now.' : 'Write instructions for this edit… (Enter to send, Shift+Enter for a new line)'}
             rows={3}
           />
-          <button className="primary" onClick={send} disabled={busy || !text.trim()}>
+          <button className="primary" onClick={send} disabled={busy || !text.trim() || !signedIn} title={signedIn ? undefined : 'Sign in with Claude first'}>
             Send
           </button>
         </div>
+        {!signedIn && <div className="err">Sign in with Claude (bottom of the sidebar) before sending.</div>}
         {uploading && <div className="muted small">Uploading {uploading}…</div>}
       </footer>
     </main>

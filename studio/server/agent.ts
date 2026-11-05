@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { query, type CanUseTool, type McpServerConfig, type Query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { appendEvent, saveJob } from './jobs.js';
+import { refreshAccount } from './claudeAuth.js';
 import type { ChatEvent, JobMeta, JobStatus, Question } from './protocol.js';
 
 const MODEL = process.env.STUDIO_MODEL || 'claude-opus-5-5';
@@ -210,10 +211,13 @@ export class JobRunner {
       });
       for await (const msg of this.q) ok = this.handle(msg) ?? ok;
     } catch (e: any) {
-      this.emit({ kind: 'error', message: e?.message || String(e), at: Date.now() });
+      const message = e?.message || String(e);
+      const signedOut = /not logged in|\/login|401|oauth|authenticat/i.test(message);
+      this.emit({ kind: 'error', message: signedOut ? 'Claude is signed out. Use Sign in with Claude in the sidebar, then send again.' : message, at: Date.now() });
     } finally {
       this.q = undefined;
       for (const [id, r] of this.pending) r(null), this.pending.delete(id);
+      if (!ok) refreshAccount(); // a failed run may mean the login expired; the sidebar shows it
       this.setStatus(ok ? 'done' : 'error');
       this.broadcast(this.meta.id, { filesChanged: true });
     }

@@ -31,6 +31,8 @@
     "start": "node dist/cli.js",
     "studio": "npm --prefix studio start",
     "studio:dev": "npm --prefix studio run dev",
+    "studio:lan": "npm --prefix studio run lan",
+    "studio:setup": "bash ./scripts/setup-studio-mac.sh",
     "install-cep": "node dist/cli.js --install-cep",
     "doctor": "node dist/cli.js --doctor",
     "setup:mac": "bash ./scripts/install-macos.sh",

@@ -86,6 +86,9 @@ a { color: var(--accent); }
 .newjob label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 .newjob small { color: var(--muted); font-size: 11px; }
 .err { color: var(--bad); font-size: 12px; }
+.account { margin-top: auto; border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; overflow-wrap: anywhere; }
+.account p { margin: 0; color: var(--muted); }
+.ok-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 4px; }
 nav { display: flex; flex-direction: column; gap: 4px; }
 .job { text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 8px 10px; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
 .job:hover { background: var(--bg); }
@@ -226,6 +229,8 @@ nav { display: flex; flex-direction: column; gap: 4px; }
 
 .empty { display: grid; place-content: center; text-align: center; padding: 40px; color: var(--muted); grid-column: 2 / -1; }
 .empty h1 { color: var(--ink); margin: 0 0 6px; }
+.login { min-height: 100vh; }
+.login form { width: min(260px, 100%); margin: 14px auto 0; }
 
 @media (max-width: 1100px) {
   .app { grid-template-columns: 220px minmax(0, 1fr); }
