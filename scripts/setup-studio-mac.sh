@@ -4,8 +4,8 @@
 # the main Mac by scripts/make-studio-kit.sh. Claude sign-in happens later, in Studio's sidebar.
 # Safe to run again; existing files are never overwritten.
 #
-#   npm run studio:setup
-#   npm run studio:setup -- ~/Downloads/ReelStudioKit-20261102.zip
+#   bash scripts/setup-studio-mac.sh                                   (a fresh Mac has no npm yet)
+#   bash scripts/setup-studio-mac.sh ~/Downloads/ReelStudioKit-20261102.zip
 
 set -euo pipefail
 
@@ -26,7 +26,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 if [[ -n "$KIT_ZIP" && ! -f "$KIT_ZIP" ]]; then
   echo "Kit zip not found: $KIT_ZIP"
-  echo "Usage: npm run studio:setup [-- <ReelStudioKit.zip>]"
+  echo "Usage: bash scripts/setup-studio-mac.sh [<ReelStudioKit.zip>]"
   exit 1
 fi
 
