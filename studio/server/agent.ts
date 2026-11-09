@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { query, type CanUseTool, type McpServerConfig, type Query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query, type CanUseTool, type McpServerConfig, type Query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { appendEvent, saveJob } from './jobs.js';
 import { refreshAccount } from './claudeAuth.js';
 import type { ChatEvent, JobMeta, JobStatus, Question } from './protocol.js';
@@ -18,7 +18,8 @@ const STUDIO_PROMPT = `You are running inside Reel Studio, a browser chat app th
 - When a decision is genuinely the editor's, ask with AskUserQuestion; it shows as clickable cards in their chat.
 - Keep progress messages short. Put finished videos in exports/ so they appear in the editor's player.
 - A "Typography" block comes from the editor's text panel: follow it exactly. Its fonts are installed in ~/Library/Fonts; set them in AE by the PostScript names given.
-- API keys live in single-line files, not env vars: ElevenLabs in ~/.elevenlabs_key (header xi-api-key), Magnific in ~/.magnific_key (header x-magnific-api-key; it also runs Mystic images and Kling image-to-video). Read them inside your scripts and never print them. If a file is missing, ask the editor to create it.`;
+- API keys live in single-line files, not env vars: ElevenLabs in ~/.elevenlabs_key (header xi-api-key), Magnific in ~/.magnific_key (header x-magnific-api-key; it also runs Mystic images and Kling image-to-video). Read them inside your scripts and never print them. If a file is missing, ask the editor to create it.
+- Every wait loop must also exit when the process it waits on is gone, and have a max-time cap; never wait only on log text (aerender can finish without writing "Total Time Elapsed"). Don't test \`pgrep -f name\` inside a loop whose own command contains that name, since it matches itself forever: wait on a saved PID with \`kill -0 $PID\`, or write the pattern as \`[n]ame\`.`;
 
 // Bash commands that run without asking: the media toolchain used in every edit, plus read-only shell basics.
 const SAFE_BASH = new Set([
@@ -99,9 +100,31 @@ function resultText(content: unknown): string {
 
 type Emit = (ev: ChatEvent) => void;
 
+/**
+ * The editor's message as a prompt stream that stays open until close(). A string prompt closes the SDK's input after
+ * the first result, so when a background command (Whisper, a render) later wakes the session, its permission prompts
+ * fail with "Stream closed".
+ */
+function openInput(text: string) {
+  let close!: () => void;
+  const closed = new Promise<void>((r) => (close = r));
+  async function* stream(): AsyncGenerator<SDKUserMessage> {
+    yield { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null };
+    await closed;
+  }
+  return { stream: stream(), close };
+}
+
+// After background work ends, how long to wait for the session to wake up and report before calling the job done.
+const WAKE_GRACE_MS = 60_000;
+
 export class JobRunner {
   private q?: Query;
   private pending = new Map<string, (v: any) => void>();
+  private closeInput?: () => void;
+  private bgTasks = new Set<string>();
+  private turnEnded = false;
+  private wakeTimer?: NodeJS.Timeout;
 
   constructor(
     public meta: JobMeta,
@@ -142,6 +165,15 @@ export class JobRunner {
   async stop() {
     for (const [id, r] of this.pending) r(null), this.pending.delete(id);
     await this.q?.interrupt().catch(() => {});
+    this.closeInput?.();
+  }
+
+  /** Close the input once a turn has ended and no background task can wake the session again. */
+  private settle(afterResult: boolean) {
+    clearTimeout(this.wakeTimer);
+    if (!this.turnEnded || this.bgTasks.size) return;
+    if (afterResult) this.closeInput?.();
+    else this.wakeTimer = setTimeout(() => this.closeInput?.(), WAKE_GRACE_MS);
   }
 
   private ask<T>(ev: ChatEvent & { reqId: string }, signal: AbortSignal): Promise<T | null> {
@@ -195,9 +227,13 @@ export class JobRunner {
     this.emit({ kind: 'user', text, at: Date.now() });
     this.setStatus('running');
     let ok = false;
+    const input = openInput(text);
+    this.closeInput = input.close;
+    this.bgTasks.clear();
+    this.turnEnded = false;
     try {
       this.q = query({
-        prompt: text,
+        prompt: input.stream,
         options: {
           cwd: this.meta.workdir,
           model: MODEL,
@@ -215,6 +251,9 @@ export class JobRunner {
       const signedOut = /not logged in|\/login|401|oauth|authenticat/i.test(message);
       this.emit({ kind: 'error', message: signedOut ? 'Claude is signed out. Use Sign in with Claude in the sidebar, then send again.' : message, at: Date.now() });
     } finally {
+      clearTimeout(this.wakeTimer);
+      input.close();
+      this.closeInput = undefined;
       this.q = undefined;
       for (const [id, r] of this.pending) r(null), this.pending.delete(id);
       if (!ok) refreshAccount(); // a failed run may mean the login expired; the sidebar shows it
@@ -230,6 +269,8 @@ export class JobRunner {
     }
     const now = Date.now();
     if (msg.type === 'assistant' && !msg.parent_tool_use_id) {
+      this.turnEnded = false; // a background task woke the session: keep the input open for this turn
+      clearTimeout(this.wakeTimer);
       for (const b of msg.message.content as any[]) {
         if (b.type === 'text' && b.text.trim()) this.emit({ kind: 'assistant', text: b.text, at: now });
         if (b.type === 'tool_use' && b.name !== 'AskUserQuestion') {
@@ -250,7 +291,12 @@ export class JobRunner {
       const ok = msg.subtype === 'success';
       if (!ok) this.emit({ kind: 'error', message: `Run ended: ${msg.subtype}`, at: now });
       this.emit({ kind: 'result', ok, costUsd: msg.total_cost_usd, durationMs: msg.duration_ms, at: now });
+      this.turnEnded = true;
+      this.settle(true);
       return ok;
+    } else if (msg.type === 'system' && msg.subtype === 'background_tasks_changed') {
+      this.bgTasks = new Set(msg.tasks.filter((t) => !t.ambient).map((t) => t.task_id));
+      this.settle(false);
     }
   }
 }
